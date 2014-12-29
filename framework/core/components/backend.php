@@ -545,21 +545,44 @@ final class _FW_Component_Backend
 			return;
 		}
 
-		$old_values = (array)fw_get_db_post_option($post_id);
+		$all_options = fw_extract_only_options(fw()->theme->get_post_options($post->post_type));
+//		$regular_options = array();
 
+		$old_values = (array)fw_get_db_post_option($post_id);
 		$options_values = array_merge(
 			$old_values,
 			fw_get_options_values_from_input(
 				fw()->theme->get_post_options($post->post_type)
 			)
 		);
+		$handled_values = array();
 
-		fw_set_db_post_option($post_id, null, $options_values);
+		foreach ($all_options as $option_id => $option) {
+			if (
+				isset($option['option_handler']) &&
+				$option['option_handler'] instanceof FW_Option_Handler
+			) {
+
+				/*
+				 * if the option has a custom option_handler
+				 * the saving is delegated to the handler,
+				 * so it does not go to the post_meta
+				 */
+				$option['option_handler']->save_option_value($option_id, $option, $options_values[$option_id]);
+//				$option['option_handler']->save_option_value($option_id, $option, $options_values[$option_id], array(
+//					'post_id' => $post_id
+//				));
+				$handled_values[$option_id] = $options_values[$option_id];
+				unset($all_options[$option_id]);
+			}
+		}
+
+		fw_set_db_post_option($post_id, null, array_diff_key($options_values, $handled_values));
 
 		/**
 		 * find options that requested to be saved in separate meta
 		 */
-		foreach (fw_extract_only_options(fw()->theme->get_post_options($post->post_type)) as $option_id => $option) {
+		foreach ($all_options as $option_id => $option) {
 			if (isset($option['save-in-separate-meta']) && $option['save-in-separate-meta']) {
 				fw_update_post_meta($post_id, 'fw_option:'. $option_id, $options_values[$option_id]);
 			}
@@ -980,6 +1003,19 @@ final class _FW_Component_Backend
 
 		if (!isset($data['id_prefix'])) {
 			$data['id_prefix'] = FW_Option_Type::get_default_id_prefix();
+		}
+
+		if (
+			isset($option['option_handler']) &&
+			$option['option_handler'] instanceof FW_Option_Handler
+		) {
+
+			/*
+			 * if the option has a custom option_handler
+			 * then the handler provides the option's value
+			 */
+			// TODO: think of a way to send the post id in $data in the third argument
+			$data['value'] = $option['option_handler']->get_option_value($id, $option);
 		}
 
 		return fw_render_view(fw_get_framework_directory('/views/backend-option-design-'. $design .'.php'), array(
